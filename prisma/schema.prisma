@@ -1,0 +1,556 @@
+// Prisma schema for POS SaaS — Philippine small-business multi-tenant.
+// Connection URLs are configured in prisma.config.ts (Prisma 7+).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS — finite, slowly-changing sets only. Things that may grow (units,
+// expense categories) stay as strings to avoid migration churn on Postgres
+// enum types.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  GCASH
+  PAYMAYA
+  BANK_TRANSFER
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+  PARTIALLY_REFUNDED
+  VOIDED
+}
+
+enum InventoryMovementType {
+  STOCK_IN
+  STOCK_OUT
+  SALE
+  RETURN
+  ADJUSTMENT
+}
+
+enum SubscriptionPaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IDENTITY — users, businesses, branches, roles, memberships
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Local mirror of Supabase auth.users. `id` is the auth user id.
+model User {
+  id              String    @id @db.Uuid
+  email           String    @unique
+  fullName        String?   @map("full_name")
+  phone           String?
+  avatarUrl       String?   @map("avatar_url")
+  isPlatformAdmin Boolean   @default(false) @map("is_platform_admin")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  ownedBusinesses        Business[]            @relation("BusinessOwner")
+  memberships            BusinessMember[]
+  salesAsCashier         Sale[]                @relation("SaleCashier")
+  voidedSales            Sale[]                @relation("SaleVoidedBy")
+  expensesCreated        Expense[]
+  activityLogs           ActivityLog[]
+  inventoryMovements     InventoryMovement[]
+  submittedPayments      SubscriptionPayment[] @relation("SubPaymentSubmittedBy")
+  reviewedPayments       SubscriptionPayment[] @relation("SubPaymentReviewedBy")
+
+  @@index([deletedAt])
+  @@index([isPlatformAdmin])
+  @@map("users")
+}
+
+model Business {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  slug          String    @unique
+  ownerUserId   String    @map("owner_user_id") @db.Uuid
+  timezone      String    @default("Asia/Manila")
+  currency      String    @default("PHP")
+  businessType  String?   @map("business_type")
+  phone         String?
+  email         String?
+  addressLine1  String?   @map("address_line1")
+  addressLine2  String?   @map("address_line2")
+  city          String?
+  province      String?
+  postalCode    String?   @map("postal_code")
+  country       String    @default("PH")
+  taxId         String?   @map("tax_id")
+  vatRegistered Boolean   @default(false) @map("vat_registered")
+  defaultTaxRateBps Int   @default(1200) @map("default_tax_rate_bps") // 12% PH VAT
+  logoUrl       String?   @map("logo_url")
+  receiptHeader String?   @map("receipt_header")
+  receiptFooter String?   @map("receipt_footer")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  owner                User                  @relation("BusinessOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  members              BusinessMember[]
+  branches             Branch[]
+  roles                Role[]
+  subscription         Subscription?
+  subscriptionPayments SubscriptionPayment[]
+  products             Product[]
+  categories           Category[]
+  inventory            InventoryLevel[]
+  sales                Sale[]
+  saleItems            SaleItem[]
+  expenses             Expense[]
+  customers            Customer[]
+  activityLogs         ActivityLog[]
+  inventoryMovements   InventoryMovement[]
+
+  @@index([deletedAt])
+  @@index([ownerUserId])
+  @@map("businesses")
+}
+
+model Branch {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId String    @map("business_id") @db.Uuid
+  name       String
+  address    String?
+  isDefault  Boolean   @default(false) @map("is_default")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  business           Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  inventory          InventoryLevel[]
+  sales              Sale[]
+  expenses           Expense[]
+  inventoryMovements InventoryMovement[]
+
+  @@unique([businessId, name])
+  @@index([businessId, deletedAt])
+  @@map("branches")
+}
+
+// businessId NULL means a system-defined role available to all tenants.
+model Role {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId  String?  @map("business_id") @db.Uuid
+  name        String
+  description String?
+  permissions Json     @default("[]") // string[] of permission codes
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  business    Business?        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  memberships BusinessMember[]
+
+  @@unique([businessId, name])
+  @@index([businessId])
+  @@map("roles")
+}
+
+model BusinessMember {
+  businessId String    @map("business_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  roleId     String    @map("role_id") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([businessId, userId])
+  @@index([userId])
+  @@index([businessId, deletedAt])
+  @@map("business_members")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BILLING — plans, subscriptions
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Plan {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code            String          @unique
+  name            String
+  description     String?
+  priceCentavos   Int             @map("price_centavos")
+  billingInterval BillingInterval @map("billing_interval")
+  maxUsers        Int             @map("max_users")
+  maxProducts     Int             @map("max_products")
+  maxBranches     Int             @map("max_branches")
+  features        Json            @default("{}")
+  isActive        Boolean         @default(true) @map("is_active")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  subscriptions Subscription[]
+  payments      SubscriptionPayment[]
+
+  @@map("plans")
+}
+
+// Manual GCash / Maya / bank-transfer payment for a subscription.
+// Lifecycle: PENDING (submitted) → APPROVED (admin reviewed + sub activated)
+// or REJECTED (admin reviewed + reason recorded). Proof is stored in the
+// private `payment-proofs` Supabase Storage bucket under
+// {businessId}/{paymentId}/{filename}; access is via short-lived signed URLs.
+model SubscriptionPayment {
+  id                String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId        String                    @map("business_id") @db.Uuid
+  planId            String                    @map("plan_id") @db.Uuid
+  submittedByUserId String                    @map("submitted_by_user_id") @db.Uuid
+  method            PaymentMethod
+  amountCentavos    Int                       @map("amount_centavos")
+  referenceNumber   String?                   @map("reference_number")
+  proofStoragePath  String?                   @map("proof_storage_path")
+  proofMimeType     String?                   @map("proof_mime_type")
+  notes             String?
+  status            SubscriptionPaymentStatus @default(PENDING)
+  reviewedAt        DateTime?                 @map("reviewed_at") @db.Timestamptz(6)
+  reviewedByUserId  String?                   @map("reviewed_by_user_id") @db.Uuid
+  reviewerNote      String?                   @map("reviewer_note")
+  rejectionReason   String?                   @map("rejection_reason")
+  createdAt         DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  plan           Plan     @relation(fields: [planId], references: [id], onDelete: Restrict)
+  submittedBy    User     @relation("SubPaymentSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: Restrict)
+  reviewedByUser User?    @relation("SubPaymentReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("subscription_payments")
+}
+
+// Singleton: platform-wide manual-payment recipient details shown on the
+// /billing/pay page. Edited by platform admins at /admin/billing-settings.
+// `id` is hardcoded to 'singleton' so we always upsert the same row.
+model PlatformBillingSettings {
+  id                 String   @id @default("singleton")
+  gcashAccountName   String?  @map("gcash_account_name")
+  gcashAccountNumber String?  @map("gcash_account_number")
+  gcashQrUrl         String?  @map("gcash_qr_url")
+  mayaAccountName    String?  @map("maya_account_name")
+  mayaAccountNumber  String?  @map("maya_account_number")
+  mayaQrUrl          String?  @map("maya_qr_url")
+  bankName           String?  @map("bank_name")
+  bankAccountName    String?  @map("bank_account_name")
+  bankAccountNumber  String?  @map("bank_account_number")
+  bankBranch         String?  @map("bank_branch")
+  instructions       String?
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("platform_billing_settings")
+}
+
+model Subscription {
+  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId             String             @unique @map("business_id") @db.Uuid
+  planId                 String             @map("plan_id") @db.Uuid
+  status                 SubscriptionStatus
+  currentPeriodStart     DateTime           @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd       DateTime           @map("current_period_end") @db.Timestamptz(6)
+  trialEndsAt            DateTime?          @map("trial_ends_at") @db.Timestamptz(6)
+  canceledAt             DateTime?          @map("canceled_at") @db.Timestamptz(6)
+  paymongoSubscriptionId String?            @unique @map("paymongo_subscription_id")
+  paymongoCustomerId     String?            @map("paymongo_customer_id")
+  createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  plan     Plan     @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@index([currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CATALOG — categories, products
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Category {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId String    @map("business_id") @db.Uuid
+  parentId   String?   @map("parent_id") @db.Uuid
+  name       String
+  sortOrder  Int       @default(0) @map("sort_order")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  business Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  parent   Category?  @relation("CategoryParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryParent")
+  products Product[]
+
+  @@index([businessId, parentId, sortOrder])
+  @@index([businessId, deletedAt])
+  @@map("categories")
+}
+
+model Product {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId     String    @map("business_id") @db.Uuid
+  categoryId     String?   @map("category_id") @db.Uuid
+  sku            String
+  barcode        String?
+  name           String
+  description    String?
+  priceCentavos  Int       @map("price_centavos")
+  costCentavos   Int       @default(0) @map("cost_centavos")
+  taxRateBps     Int       @default(0) @map("tax_rate_bps") // basis points, 1200 = 12% VAT
+  unit           String    @default("piece")
+  imageUrl       String?   @map("image_url")
+  trackInventory Boolean   @default(true) @map("track_inventory")
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  business           Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  category           Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  inventory          InventoryLevel[]
+  saleItems          SaleItem[]
+  inventoryMovements InventoryMovement[]
+
+  @@unique([businessId, sku])
+  @@index([businessId, deletedAt, name])
+  @@index([businessId, categoryId])
+  @@index([businessId, barcode])
+  @@map("products")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INVENTORY — per-branch stock levels
+// ─────────────────────────────────────────────────────────────────────────────
+
+model InventoryLevel {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId    String    @map("business_id") @db.Uuid
+  branchId      String    @map("branch_id") @db.Uuid
+  productId     String    @map("product_id") @db.Uuid
+  quantity      Decimal   @default(0) @db.Decimal(14, 4)
+  reorderPoint  Decimal   @default(0) @map("reorder_point") @db.Decimal(14, 4)
+  lastCountedAt DateTime? @map("last_counted_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  branch   Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, branchId, productId])
+  @@index([businessId, branchId])
+  @@index([productId])
+  @@map("inventory_levels")
+}
+
+// Append-only ledger of every change to stock. Sales, manual ops, and
+// adjustments all write here. `quantityDelta` is signed (positive = added,
+// negative = removed). `balanceAfter` snapshots the level at write time.
+model InventoryMovement {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId      String                @map("business_id") @db.Uuid
+  branchId        String                @map("branch_id") @db.Uuid
+  productId       String                @map("product_id") @db.Uuid
+  type            InventoryMovementType
+  quantityDelta   Decimal               @map("quantity_delta") @db.Decimal(14, 4)
+  balanceAfter    Decimal               @map("balance_after") @db.Decimal(14, 4)
+  reason          String?
+  referenceType   String?               @map("reference_type")
+  referenceId     String?               @map("reference_id") @db.Uuid
+  createdByUserId String?               @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  branch        Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdByUser User?    @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, branchId, productId, createdAt(sort: Desc)])
+  @@index([businessId, productId, createdAt(sort: Desc)])
+  @@index([businessId, type, createdAt(sort: Desc)])
+  @@index([referenceType, referenceId])
+  @@map("inventory_movements")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CUSTOMERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Customer {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId    String    @map("business_id") @db.Uuid
+  name          String
+  email         String?
+  phone         String?
+  address       String?
+  notes         String?
+  loyaltyPoints Int       @default(0) @map("loyalty_points")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  sales    Sale[]
+
+  @@index([businessId, deletedAt, name])
+  @@index([businessId, phone])
+  @@map("customers")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SALES — append-only ledger. Use voidedAt instead of deletedAt for compliance.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Sale {
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId         String        @map("business_id") @db.Uuid
+  branchId           String        @map("branch_id") @db.Uuid
+  customerId         String?       @map("customer_id") @db.Uuid
+  cashierUserId      String        @map("cashier_user_id") @db.Uuid
+  receiptNumber      String        @map("receipt_number")
+  subtotalCentavos   Int           @map("subtotal_centavos")
+  discountCentavos   Int           @default(0) @map("discount_centavos")
+  taxCentavos        Int           @default(0) @map("tax_centavos")
+  totalCentavos      Int           @map("total_centavos")
+  amountPaidCentavos Int           @default(0) @map("amount_paid_centavos")
+  changeCentavos     Int           @default(0) @map("change_centavos")
+  paymentMethod      PaymentMethod @map("payment_method")
+  paymentStatus      PaymentStatus @default(PENDING) @map("payment_status")
+  paymongoIntentId   String?       @map("paymongo_intent_id")
+  idempotencyKey     String        @map("idempotency_key") // client-generated, dedupes retries
+  notes              String?
+  voidedAt           DateTime?     @map("voided_at") @db.Timestamptz(6)
+  voidedByUserId     String?       @map("voided_by_user_id") @db.Uuid
+  voidedReason       String?       @map("voided_reason")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  business     Business   @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  branch       Branch     @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer     Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  cashier      User       @relation("SaleCashier", fields: [cashierUserId], references: [id], onDelete: Restrict)
+  voidedByUser User?      @relation("SaleVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
+  items        SaleItem[]
+
+  @@unique([businessId, receiptNumber])
+  @@unique([businessId, idempotencyKey])
+  @@index([businessId, branchId, createdAt(sort: Desc)])
+  @@index([businessId, customerId])
+  @@index([businessId, cashierUserId, createdAt(sort: Desc)])
+  @@index([businessId, paymentStatus])
+  @@index([paymongoIntentId])
+  @@map("sales")
+}
+
+// businessId denormalized for tenant-scoped queries + RLS.
+// productName / productSku snapshotted so reprinting an old receipt works
+// even after the product is renamed or deleted.
+model SaleItem {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId        String   @map("business_id") @db.Uuid
+  saleId            String   @map("sale_id") @db.Uuid
+  productId         String   @map("product_id") @db.Uuid
+  productName       String   @map("product_name")
+  productSku        String   @map("product_sku")
+  quantity          Decimal  @db.Decimal(14, 4)
+  unitPriceCentavos Int      @map("unit_price_centavos")
+  discountCentavos  Int      @default(0) @map("discount_centavos")
+  taxCentavos       Int      @default(0) @map("tax_centavos")
+  totalCentavos     Int      @map("total_centavos")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  sale     Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, saleId])
+  @@index([businessId, productId, createdAt(sort: Desc)])
+  @@map("sale_items")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPENSES
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Expense {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId      String    @map("business_id") @db.Uuid
+  branchId        String?   @map("branch_id") @db.Uuid
+  category        String
+  amountCentavos  Int       @map("amount_centavos")
+  description     String?
+  paidAt          DateTime  @map("paid_at") @db.Timestamptz(6)
+  createdByUserId String    @map("created_by_user_id") @db.Uuid
+  receiptUrl      String?   @map("receipt_url")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdByUser User     @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, deletedAt, paidAt(sort: Desc)])
+  @@index([businessId, branchId, paidAt(sort: Desc)])
+  @@index([businessId, category])
+  @@map("expenses")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDIT — append-only activity log
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ActivityLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId String   @map("business_id") @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id") @db.Uuid
+  diff       Json?
+  ipAddress  String?  @map("ip_address") @db.Inet
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, createdAt(sort: Desc)])
+  @@index([businessId, entityType, entityId, createdAt(sort: Desc)])
+  @@index([businessId, userId, createdAt(sort: Desc)])
+  @@map("activity_logs")
+}
