@@ -2,11 +2,19 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { ShoppingCart } from "lucide-react";
 import { toast } from "sonner";
 import { createSale } from "@/features/sales/actions";
 import type { PosProduct } from "@/features/sales/queries";
 import type { PosPaymentMethod } from "@/features/sales/schemas";
 import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { formatPHP } from "@/lib/money";
 import { ProductGrid } from "./product-grid";
 import { CartPanel } from "./cart-panel";
 import { ReceiptView } from "./receipt-view";
@@ -60,9 +68,9 @@ export function PosClient({
 }: Props) {
   const router = useRouter();
   const [cart, setCart] = useState<CartLine[]>([]);
-  const [discount, setDiscount] = useState<number>(0); // in PHP
+  const [discount, setDiscount] = useState<number>(0);
   const [paymentMethod, setPaymentMethod] = useState<PosPaymentMethod>("CASH");
-  const [amountPaid, setAmountPaid] = useState<number>(0); // in PHP
+  const [amountPaid, setAmountPaid] = useState<number>(0);
   const [idempotencyKey, setIdempotencyKey] = useState<string>(
     () => freshIdempotencyKey(),
   );
@@ -70,6 +78,7 @@ export function PosClient({
     null,
   );
   const [pending, startTransition] = useTransition();
+  const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const productMap = useMemo(
@@ -99,6 +108,8 @@ export function PosClient({
       ? Math.round(amountPaid * 100)
       : totalCentavos;
   const changeCentavos = Math.max(0, amountPaidCentavos - totalCentavos);
+
+  const cartItemCount = cart.reduce((sum, l) => sum + l.quantity, 0);
 
   const canSubmit =
     cart.length > 0 &&
@@ -155,10 +166,7 @@ export function PosClient({
       prev.map((l) => {
         if (l.productId !== productId) return l;
         const product = productMap.get(productId);
-        if (
-          product?.trackInventory &&
-          qty > product.available
-        ) {
+        if (product?.trackInventory && qty > product.available) {
           toast.error(
             `Only ${product.available} ${product.unit} of ${product.name} available`,
           );
@@ -180,6 +188,7 @@ export function PosClient({
     setPaymentMethod("CASH");
     setIdempotencyKey(freshIdempotencyKey());
     setCompleted(null);
+    setMobileCartOpen(false);
     setTimeout(() => searchInputRef.current?.focus(), 50);
   };
 
@@ -220,6 +229,7 @@ export function PosClient({
         ...snapshot,
         receiptNumber: result.data.receiptNumber,
       });
+      setMobileCartOpen(false);
       router.refresh();
     });
   };
@@ -230,39 +240,89 @@ export function PosClient({
 
   if (completed) {
     return (
-      <div className="mx-auto w-full max-w-3xl p-6">
+      <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
         <ReceiptView sale={completed} onNewSale={resetSale} />
       </div>
     );
   }
 
+  // The cart UI is the same on desktop and mobile — desktop renders it
+  // as a column, mobile renders it inside a slide-up Sheet triggered by
+  // the sticky bottom bar. One source of truth, two layouts.
+  const cartProps = {
+    cart,
+    subtotalCentavos,
+    taxCentavos,
+    discount,
+    discountCentavos,
+    totalCentavos,
+    paymentMethod,
+    amountPaid,
+    amountPaidCentavos,
+    changeCentavos,
+    pending,
+    canSubmit,
+    onUpdateQty: updateQty,
+    onRemove: removeFromCart,
+    onChangeDiscount: setDiscount,
+    onChangePaymentMethod: setPaymentMethod,
+    onChangeAmountPaid: setAmountPaid,
+    onCompleteSale: completeSale,
+  };
+
   return (
-    <div className="grid h-full grid-cols-1 gap-4 p-4 lg:grid-cols-[1fr,420px]">
-      <ProductGrid
-        products={products}
-        searchInputRef={searchInputRef}
-        onAdd={addToCart}
-      />
-      <CartPanel
-        cart={cart}
-        subtotalCentavos={subtotalCentavos}
-        taxCentavos={taxCentavos}
-        discount={discount}
-        discountCentavos={discountCentavos}
-        totalCentavos={totalCentavos}
-        paymentMethod={paymentMethod}
-        amountPaid={amountPaid}
-        amountPaidCentavos={amountPaidCentavos}
-        changeCentavos={changeCentavos}
-        pending={pending}
-        canSubmit={canSubmit}
-        onUpdateQty={updateQty}
-        onRemove={removeFromCart}
-        onChangeDiscount={setDiscount}
-        onChangePaymentMethod={setPaymentMethod}
-        onChangeAmountPaid={setAmountPaid}
-        onCompleteSale={completeSale}
-      />
-    </div>
+    <>
+      <div className="flex h-full flex-col gap-4 p-3 sm:p-4 lg:grid lg:grid-cols-[1fr,420px]">
+        <ProductGrid
+          products={products}
+          searchInputRef={searchInputRef}
+          onAdd={addToCart}
+        />
+        {/* Desktop cart — hidden below lg, where the sheet takes over. */}
+        <div className="hidden lg:block">
+          <CartPanel {...cartProps} />
+        </div>
+      </div>
+
+      {/* Mobile-only sticky CTA — appears when the cart has items.
+          Pinned above the bottom nav (bottom: 4.5rem ≈ 72px). */}
+      {cart.length > 0 ? (
+        <div className="pb-safe pointer-events-none fixed inset-x-0 bottom-16 z-30 px-3 lg:hidden">
+          <Button
+            type="button"
+            onClick={() => setMobileCartOpen(true)}
+            className="pointer-events-auto h-14 w-full justify-between gap-3 rounded-xl px-5 text-base shadow-[var(--shadow-overlay)]"
+            aria-label={`View cart with ${cartItemCount} items, total ${formatPHP(totalCentavos)}`}
+          >
+            <span className="flex items-center gap-3">
+              <span className="relative">
+                <ShoppingCart className="h-5 w-5" />
+                <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-xs font-semibold text-neutral-900">
+                  {cartItemCount}
+                </span>
+              </span>
+              <span>View cart</span>
+            </span>
+            <span className="tabular-nums">{formatPHP(totalCentavos)}</span>
+          </Button>
+        </div>
+      ) : null}
+
+      {/* Mobile cart drawer. The desktop layout already shows the cart
+          permanently in its own column. */}
+      <Sheet open={mobileCartOpen} onOpenChange={setMobileCartOpen}>
+        <SheetContent
+          side="right"
+          className="flex w-full max-w-md flex-col gap-0 p-0 sm:max-w-lg"
+        >
+          <SheetHeader className="border-b border-neutral-200 px-4 py-3 text-left dark:border-neutral-800">
+            <SheetTitle className="text-base">Your cart</SheetTitle>
+          </SheetHeader>
+          <div className="flex-1 overflow-hidden">
+            <CartPanel {...cartProps} />
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }

@@ -1,14 +1,19 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+// Card primitive — Stripe-inspired soft surface. Uses the design-token
+// shadow from globals.css so the elevation feels consistent across the
+// app. `interactive` upgrades hover behavior for clickable tiles.
 export const Card = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
+  React.HTMLAttributes<HTMLDivElement> & { interactive?: boolean }
+>(({ className, interactive, ...props }, ref) => (
   <div
     ref={ref}
     className={cn(
-      "rounded-xl border border-neutral-200 bg-white text-neutral-950 shadow-sm dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-50",
+      "rounded-xl border border-neutral-200 bg-white text-neutral-950 shadow-[var(--shadow-card)] dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-50",
+      interactive &&
+        "cursor-pointer transition-shadow hover:shadow-[var(--shadow-elevated)]",
       className,
     )}
     {...props}
