@@ -20,7 +20,10 @@ if (!email || !password) {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseSecret =
   process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
-const dbUrl = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+// Prefer DATABASE_URL (pooler — works on every network) over DIRECT_URL
+// (direct connection — IPv6-only on Supabase free tier, blocked on some
+// networks). Either works, but pooler is more reliable.
+const dbUrl = process.env.DATABASE_URL ?? process.env.DIRECT_URL;
 
 if (!supabaseUrl) fail("NEXT_PUBLIC_SUPABASE_URL is not set in .env.local");
 if (!supabaseSecret) fail("SUPABASE_SECRET_KEY is not set in .env.local");

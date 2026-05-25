@@ -224,42 +224,136 @@ export function ProductsTable({ items, canEdit, canDelete, onEdit }: Props) {
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-950">
-      <table className="w-full text-sm">
-        <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-          {table.getHeaderGroups().map((headerGroup) => (
-            <tr key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <th key={header.id} className="px-4 py-3 font-medium">
-                  {header.isPlaceholder
-                    ? null
-                    : flexRender(
-                        header.column.columnDef.header,
-                        header.getContext(),
-                      )}
-                </th>
-              ))}
-            </tr>
-          ))}
-        </thead>
-        <tbody>
-          {table.getRowModel().rows.map((row) => (
-            <tr
-              key={row.id}
-              className="border-b border-neutral-100 last:border-0 dark:border-neutral-800"
-            >
-              {row.getVisibleCells().map((cell) => (
-                <td key={cell.id} className="px-4 py-3">
-                  {flexRender(
-                    cell.column.columnDef.cell,
-                    cell.getContext(),
-                  )}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      {/* ── Mobile card list — shown on <md ──────────────────────── */}
+      <ul className="space-y-2 md:hidden">
+        {items.map((p) => (
+          <li
+            key={p.id}
+            className="rounded-xl border border-neutral-200 bg-white p-4 shadow-[var(--shadow-card)] dark:border-neutral-800 dark:bg-neutral-950"
+          >
+            <div className="flex items-start gap-3">
+              <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-neutral-100 dark:bg-neutral-900">
+                {p.imageUrl ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={p.imageUrl}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : null}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{p.name}</div>
+                <div className="truncate font-mono text-[11px] text-neutral-500 dark:text-neutral-400">
+                  {p.sku}
+                </div>
+                {p.categoryName ? (
+                  <div className="mt-0.5 truncate text-xs text-neutral-500 dark:text-neutral-400">
+                    {p.categoryName}
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-2">
+                <div className="text-base font-semibold tabular-nums">
+                  {p.priceDisplay}
+                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Actions"
+                      disabled={pending}
+                      className="-mr-2 h-8 w-8"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    {canEdit ? (
+                      <DropdownMenuItem onClick={() => onEdit(p)}>
+                        <Pencil className="h-4 w-4" /> Edit
+                      </DropdownMenuItem>
+                    ) : null}
+                    {canEdit ? (
+                      <DropdownMenuItem onClick={() => onArchive(p.id)}>
+                        {p.isActive ? (
+                          <>
+                            <Archive className="h-4 w-4" /> Archive
+                          </>
+                        ) : (
+                          <>
+                            <ArchiveRestore className="h-4 w-4" /> Unarchive
+                          </>
+                        )}
+                      </DropdownMenuItem>
+                    ) : null}
+                    {canDelete ? (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => onDelete(p.id, p.name)}
+                          className="text-red-600 focus:text-red-700 dark:text-red-400"
+                        >
+                          <Trash2 className="h-4 w-4" /> Delete
+                        </DropdownMenuItem>
+                      </>
+                    ) : null}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              <StockCell row={p} />
+              {p.isActive ? (
+                <Badge variant="success">Active</Badge>
+              ) : (
+                <Badge variant="secondary">Archived</Badge>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {/* ── Desktop table — shown on md+ ─────────────────────────── */}
+      <div className="hidden overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-[var(--shadow-card)] md:block dark:border-neutral-800 dark:bg-neutral-950">
+        <table className="w-full text-sm">
+          <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+            {table.getHeaderGroups().map((headerGroup) => (
+              <tr key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <th key={header.id} className="px-4 py-3 font-medium">
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(
+                          header.column.columnDef.header,
+                          header.getContext(),
+                        )}
+                  </th>
+                ))}
+              </tr>
+            ))}
+          </thead>
+          <tbody>
+            {table.getRowModel().rows.map((row) => (
+              <tr
+                key={row.id}
+                className="border-b border-neutral-100 last:border-0 dark:border-neutral-800"
+              >
+                {row.getVisibleCells().map((cell) => (
+                  <td key={cell.id} className="px-4 py-3">
+                    {flexRender(
+                      cell.column.columnDef.cell,
+                      cell.getContext(),
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }

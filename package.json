@@ -20,7 +20,8 @@
     "db:studio": "prisma studio",
     "admin:create": "tsx scripts/create-platform-admin.ts",
     "tenant:create": "tsx scripts/create-tenant.ts",
-    "demo:seed": "tsx scripts/seed-demo.ts"
+    "demo:seed": "tsx scripts/seed-demo.ts",
+    "env:push": "bash scripts/push-env-to-vercel.sh"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",

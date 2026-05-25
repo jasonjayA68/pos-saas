@@ -46,7 +46,48 @@ export function AdminPaymentsClient({
 
   return (
     <>
-      <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-950">
+      {/* ── Mobile card list — shown on <md ──────────────────────── */}
+      <ul className="space-y-2 md:hidden">
+        {payments.map((p) => (
+          <li key={p.id}>
+            <button
+              type="button"
+              onClick={() => setSelected(p)}
+              className="w-full rounded-xl border border-neutral-200 bg-white p-4 text-left shadow-[var(--shadow-card)] transition-colors hover:bg-neutral-50 active:bg-neutral-100 dark:border-neutral-800 dark:bg-neutral-950 dark:hover:bg-neutral-900"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{p.businessName}</div>
+                  <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {formatPHDateTime(p.createdAtIso)}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-lg font-semibold tabular-nums">
+                    {formatPHP(p.amountCentavos)}
+                  </div>
+                  <StatusBadge status={p.status} />
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-400">
+                <Badge variant="secondary">{p.planName}</Badge>
+                <span aria-hidden="true">·</span>
+                <span>
+                  {MANUAL_PAYMENT_METHOD_LABELS[
+                    p.method as ManualPaymentMethod
+                  ] ?? p.method}
+                </span>
+                <span className="ml-auto text-[var(--brand-accent)]">
+                  Review →
+                </span>
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      {/* ── Desktop table — shown on md+ ─────────────────────────── */}
+      <div className="hidden overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-[var(--shadow-card)] md:block dark:border-neutral-800 dark:bg-neutral-950">
         <table className="w-full text-sm">
           <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
             <tr>
