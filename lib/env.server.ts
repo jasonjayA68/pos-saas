@@ -10,6 +10,8 @@ const serverSchema = z.object({
   PAYMONGO_WEBHOOK_SECRET: z.string().optional(),
 });
 
+type ServerEnv = z.infer<typeof serverSchema>;
+
 const supabaseSecret =
   process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -22,10 +24,35 @@ const parsed = serverSchema.safeParse({
   PAYMONGO_WEBHOOK_SECRET: process.env.PAYMONGO_WEBHOOK_SECRET,
 });
 
-if (!parsed.success) {
+// Build-phase tolerance — see lib/env.ts for full rationale. Vercel's
+// build phase sometimes runs before all env vars are populated; throwing
+// at module import crashes every server file. We log loudly and let the
+// build complete; runtime requests will fail clearly if env isn't set.
+const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
+
+if (!parsed.success && !isBuildPhase) {
   throw new Error(
     `Invalid server env: ${JSON.stringify(parsed.error.flatten().fieldErrors)}`,
   );
 }
 
-export const serverEnv = parsed.data;
+if (!parsed.success && isBuildPhase) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    "\n[env.server] ⚠ Missing server env vars during build:\n" +
+      JSON.stringify(parsed.error.flatten().fieldErrors, null, 2) +
+      "\n[env.server] Build will continue with placeholders. Runtime " +
+      "requests will fail unless these are set in Vercel project settings.\n",
+  );
+}
+
+const fallback: ServerEnv = {
+  NODE_ENV: "production",
+  DATABASE_URL: "postgresql://placeholder",
+  DIRECT_URL: "postgresql://placeholder",
+  SUPABASE_SECRET_KEY: "placeholder",
+  PAYMONGO_SECRET_KEY: undefined,
+  PAYMONGO_WEBHOOK_SECRET: undefined,
+};
+
+export const serverEnv: ServerEnv = parsed.success ? parsed.data : fallback;
