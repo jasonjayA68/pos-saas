@@ -30,5 +30,17 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    // Excluded from the production typecheck (Next.js + tsc --noEmit).
+    // These dirs are dev-only — they aren't bundled, deployed, or hit
+    // at runtime, and including them forces vitest / tsx / Supabase
+    // service-role types to be resolvable in the Vercel build env,
+    // which fails because devDependencies aren't always there.
+    // Vitest picks up `tests/` independently via vitest.config.ts.
+    "tests",
+    "scripts",
+    "prisma/seed.ts",
+    "vitest.config.ts"
+  ]
 }

@@ -57,7 +57,9 @@ export default async function AdminHome() {
       }),
     ]);
 
-  const mrrCentavos = activeSubs.reduce((sum, s) => {
+  // Explicit <number> generic: defensive in case Prisma type inference
+  // fails during a clean Vercel build before `prisma generate` finishes.
+  const mrrCentavos = activeSubs.reduce<number>((sum, s) => {
     const monthly =
       s.plan.billingInterval === "YEARLY"
         ? Math.round(s.plan.priceCentavos / 12)

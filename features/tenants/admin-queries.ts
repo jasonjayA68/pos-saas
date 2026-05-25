@@ -534,8 +534,10 @@ export async function getSaasAnalytics(): Promise<SaasAnalytics> {
     }),
   ]);
 
-  // MRR: sum of ACTIVE plan prices, monthly-normalized.
-  const mrrCentavos = activeSubs.reduce((sum, s) => {
+  // MRR: sum of ACTIVE plan prices, monthly-normalized. Explicit
+  // <number> generic protects against fresh-install builds (Vercel)
+  // where Prisma types may not be ready yet.
+  const mrrCentavos = activeSubs.reduce<number>((sum, s) => {
     const monthly =
       s.plan.billingInterval === "YEARLY"
         ? Math.round(s.plan.priceCentavos / 12)
@@ -558,7 +560,7 @@ export async function getSaasAnalytics(): Promise<SaasAnalytics> {
         if (!reviewed) return false;
         return monthKey === reviewed.toISOString().slice(0, 7);
       })
-      .reduce((sum, p) => sum + p.amountCentavos, 0);
+      .reduce<number>((sum, p) => sum + p.amountCentavos, 0);
   });
 
   // Payment trends — group by day.
