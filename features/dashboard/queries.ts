@@ -153,3 +153,182 @@ export async function getRecentActivity(
     createdAtIso: r.createdAt.toISOString(),
   }));
 }
+
+// Total customers — replaces "active products" in the new dashboard KPI
+// row to match the mockup. Fast: indexed scalar count.
+export async function getCustomerCount(): Promise<number> {
+  const member = await requirePermission("sale:read");
+  return prisma.customer.count({
+    where: { businessId: member.businessId, deletedAt: null },
+  });
+}
+
+// Sales by day for the Sales Overview chart. Defaults to the last 7
+// days. Returns one bucket per day even when there were no sales
+// (so the chart line stays continuous instead of skipping zeros).
+export type SalesByDay = Array<{
+  day: string; // YYYY-MM-DD
+  label: string; // "Mon", "Tue", …
+  total: number; // pesos (Number, not centavos — chart-friendly)
+  orders: number;
+}>;
+
+export async function getSalesByDay(days = 7): Promise<SalesByDay> {
+  const member = await requirePermission("sale:read");
+  const now = new Date();
+  // Start at `days - 1` ago so today is included as the last bucket.
+  const start = startOfDayInManila(
+    new Date(now.getTime() - (days - 1) * DAY_MS),
+  );
+
+  const sales = await prisma.sale.findMany({
+    where: {
+      businessId: member.businessId,
+      voidedAt: null,
+      createdAt: { gte: start },
+    },
+    select: { totalCentavos: true, createdAt: true },
+  });
+
+  // Bucket by day in Manila time so the labels line up with what
+  // cashiers see ("today" = Manila today, not UTC).
+  const buckets = new Map<string, { total: number; orders: number }>();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start.getTime() + i * DAY_MS);
+    const key = d.toISOString().slice(0, 10);
+    buckets.set(key, { total: 0, orders: 0 });
+  }
+  const DAYS_OF_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  for (const s of sales) {
+    const manila = new Date(s.createdAt.getTime() + PH_OFFSET_MS);
+    const key = manila.toISOString().slice(0, 10);
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+    bucket.total += s.totalCentavos;
+    bucket.orders += 1;
+  }
+  return Array.from(buckets.entries()).map(([key, v]) => ({
+    day: key,
+    label: DAYS_OF_WEEK[new Date(`${key}T00:00:00+08:00`).getUTCDay()] ?? key,
+    total: v.total / 100,
+    orders: v.orders,
+  }));
+}
+
+// Five most recent non-voided sales — feeds the Recent Transactions widget.
+export type RecentTransaction = {
+  id: string;
+  receiptNumber: string;
+  customerName: string;
+  totalCentavos: number;
+  createdAtIso: string;
+};
+
+export async function getRecentTransactions(
+  limit = 5,
+): Promise<RecentTransaction[]> {
+  const member = await requirePermission("sale:read");
+  const sales = await prisma.sale.findMany({
+    where: { businessId: member.businessId, voidedAt: null },
+    include: { customer: { select: { name: true } } },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+  return sales.map((s) => ({
+    id: s.id,
+    receiptNumber: s.receiptNumber,
+    customerName: s.customer?.name ?? "Walk-in Customer",
+    totalCentavos: s.totalCentavos,
+    createdAtIso: s.createdAt.toISOString(),
+  }));
+}
+
+// Top selling products — sums sale_items.quantity per product across
+// non-voided sales. Joins back to product for name + imageUrl. The mockup
+// shows last-30-day window; we use the same range for relevance.
+export type TopProduct = {
+  productId: string;
+  name: string;
+  imageUrl: string | null;
+  unitsSold: number;
+};
+
+export async function getTopSellingProducts(
+  limit = 5,
+  windowDays = 30,
+): Promise<TopProduct[]> {
+  const member = await requirePermission("sale:read");
+  const since = new Date(Date.now() - windowDays * DAY_MS);
+
+  const aggregated = await prisma.saleItem.groupBy({
+    by: ["productId"],
+    where: {
+      businessId: member.businessId,
+      sale: { voidedAt: null, createdAt: { gte: since } },
+    },
+    _sum: { quantity: true },
+    orderBy: { _sum: { quantity: "desc" } },
+    take: limit,
+  });
+
+  if (aggregated.length === 0) return [];
+
+  const productIds = aggregated.map((a) => a.productId);
+  const products = await prisma.product.findMany({
+    where: { id: { in: productIds } },
+    select: { id: true, name: true, imageUrl: true },
+  });
+  const byId = new Map(products.map((p) => [p.id, p]));
+
+  return aggregated
+    .map<TopProduct | null>((a) => {
+      const product = byId.get(a.productId);
+      if (!product) return null;
+      return {
+        productId: a.productId,
+        name: product.name,
+        imageUrl: product.imageUrl,
+        unitsSold: Number(a._sum.quantity ?? 0),
+      };
+    })
+    .filter((p): p is TopProduct => p !== null);
+}
+
+// Subscription summary for the "Current Plan" card pinned to the sidebar.
+// Pulled once per request in the (app) layout and passed down — cheaper
+// than every page re-fetching it.
+export type CurrentPlanSummary = {
+  planName: string;
+  status: string;
+  validUntilIso: string | null;
+  daysRemaining: number | null;
+  // 0–100, used for the progress bar in the sidebar card.
+  pctElapsed: number | null;
+};
+
+export async function getCurrentPlanSummary(
+  businessId: string,
+): Promise<CurrentPlanSummary | null> {
+  const sub = await prisma.subscription.findUnique({
+    where: { businessId },
+    include: { plan: { select: { name: true } } },
+  });
+  if (!sub) return null;
+  const now = Date.now();
+  const start = sub.currentPeriodStart.getTime();
+  const end = sub.currentPeriodEnd.getTime();
+  const totalMs = end - start;
+  const elapsedMs = now - start;
+  const pctElapsed =
+    totalMs > 0
+      ? Math.max(0, Math.min(100, Math.round((elapsedMs / totalMs) * 100)))
+      : null;
+  const daysRemaining = Math.max(0, Math.ceil((end - now) / DAY_MS));
+  return {
+    planName: sub.plan.name,
+    status: sub.status,
+    validUntilIso: sub.currentPeriodEnd.toISOString(),
+    daysRemaining,
+    pctElapsed,
+  };
+}

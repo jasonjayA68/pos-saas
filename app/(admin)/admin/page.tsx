@@ -1,7 +1,14 @@
 import Link from "next/link";
-import { ArrowRight, Receipt, Settings } from "lucide-react";
+import {
+  ArrowRight,
+  CreditCard,
+  TrendingUp,
+  TriangleAlert,
+  Users,
+} from "lucide-react";
 import { prisma } from "@/lib/db/client";
 import { getAdminDashboardStats } from "@/features/billing/admin-queries";
+import { getTenantsByPlan } from "@/features/tenants/admin-queries";
 import {
   Card,
   CardContent,
@@ -9,196 +16,199 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { KpiCard } from "@/app/(app)/dashboard/_components/kpi-card";
 import { formatPHDate } from "@/lib/dates";
+import { formatPHP } from "@/lib/money";
+import { TenantsByPlanChart } from "./_components/tenants-by-plan-chart";
 
 export const metadata = { title: "Platform Admin" };
 
 export default async function AdminHome() {
-  const [stats, businesses] = await Promise.all([
-    getAdminDashboardStats(),
-    prisma.business.findMany({
-      where: { deletedAt: null },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      include: {
-        owner: { select: { email: true, fullName: true } },
-        subscription: { include: { plan: { select: { code: true } } } },
-        _count: { select: { members: true, branches: true } },
-      },
-    }),
-  ]);
+  const startOfMonth = new Date(
+    new Date().getFullYear(),
+    new Date().getMonth(),
+    1,
+  );
+
+  const [stats, planDistribution, activeSubs, businesses, signupsThisMonth] =
+    await Promise.all([
+      getAdminDashboardStats(),
+      getTenantsByPlan(),
+      // MRR — sum of monthly-normalized plan prices for ACTIVE subs.
+      prisma.subscription.findMany({
+        where: { status: "ACTIVE" },
+        include: {
+          plan: { select: { priceCentavos: true, billingInterval: true } },
+        },
+      }),
+      // Most recent 5 signups for the right-rail card.
+      prisma.business.findMany({
+        where: { deletedAt: null },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        include: {
+          owner: { select: { email: true, fullName: true } },
+          subscription: { include: { plan: { select: { name: true } } } },
+        },
+      }),
+      // Signups in the current calendar month — feeds "new this month".
+      prisma.business.count({
+        where: { deletedAt: null, createdAt: { gte: startOfMonth } },
+      }),
+    ]);
+
+  const mrrCentavos = activeSubs.reduce((sum, s) => {
+    const monthly =
+      s.plan.billingInterval === "YEARLY"
+        ? Math.round(s.plan.priceCentavos / 12)
+        : s.plan.priceCentavos;
+    return sum + monthly;
+  }, 0);
+
+  const totalTenants =
+    stats.activeBusinesses + stats.trialingBusinesses;
 
   return (
     <div className="space-y-6 p-6 lg:p-0">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
-          Platform-wide snapshot of billing, subscriptions, and tenants.
+          System Summary · platform-wide health and growth.
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          label="Pending payments"
-          value={stats.pendingPayments}
+        <KpiCard
+          icon={Users}
+          label="Total Tenants"
+          value={totalTenants.toLocaleString()}
+          deltaPct={signupsThisMonth > 0 ? signupsThisMonth : null}
+          deltaLabel="new this month"
+          tone="blue"
+          href="/admin/tenants"
+        />
+        <KpiCard
+          icon={Users}
+          label="Active Tenants"
+          value={stats.activeBusinesses.toLocaleString()}
+          tone="emerald"
+          href="/admin/subscriptions"
+        />
+        <KpiCard
+          icon={TrendingUp}
+          label="Monthly Recurring Revenue"
+          value={formatPHP(mrrCentavos)}
+          tone="violet"
+          href="/admin/analytics"
+        />
+        <KpiCard
+          icon={CreditCard}
+          label="Pending Payments"
+          value={stats.pendingPayments.toLocaleString()}
+          tone="amber"
           highlight={stats.pendingPayments > 0}
-        />
-        <StatCard
-          label="Approved this month"
-          value={stats.approvedThisMonth}
-        />
-        <StatCard
-          label="Rejected this month"
-          value={stats.rejectedThisMonth}
-        />
-        <StatCard
-          label="Active businesses"
-          value={stats.activeBusinesses}
-          sub={`${stats.trialingBusinesses} on trial`}
+          actionHref="/admin/payments"
+          actionLabel="View all"
         />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <TenantsByPlanChart data={planDistribution} />
+
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Receipt className="h-4 w-4" /> Review pending payments
-            </CardTitle>
-            <CardDescription>
-              Approve or reject manual GCash, Maya, or bank-transfer payments.
-              Approving activates the subscription immediately.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle>Recent Tenants</CardTitle>
+              <CardDescription>Last 5 signups.</CardDescription>
+            </div>
             <Link
-              href="/admin/payments"
-              className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+              href="/admin/tenants"
+              className="inline-flex items-center gap-1 text-xs font-medium text-[var(--brand-accent)] hover:underline"
             >
-              Go to payments <ArrowRight className="h-3.5 w-3.5" />
+              View all <ArrowRight className="h-3 w-3" />
             </Link>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Settings className="h-4 w-4" /> Billing settings
-            </CardTitle>
-            <CardDescription>
-              Update GCash and Maya QR codes and the bank account details
-              shown on the payment page.
-            </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Link
-              href="/admin/billing-settings"
-              className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
-            >
-              Edit settings <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
+          <CardContent className="p-0">
+            {businesses.length === 0 ? (
+              <div className="px-6 pb-6 text-sm text-neutral-500 dark:text-neutral-400">
+                No tenants yet.
+              </div>
+            ) : (
+              <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                {businesses.map((b) => (
+                  <li
+                    key={b.id}
+                    className="flex items-center justify-between gap-3 px-6 py-3"
+                  >
+                    <Link
+                      href={`/admin/tenants/${b.id}`}
+                      className="flex min-w-0 flex-1 items-center gap-3 hover:opacity-80"
+                    >
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--brand-soft)] text-xs font-semibold text-[var(--brand-primary)]">
+                        {b.name.slice(0, 1).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">
+                          {b.name}
+                        </div>
+                        <div className="truncate text-xs text-neutral-500 dark:text-neutral-400">
+                          {b.owner.email}
+                        </div>
+                      </div>
+                    </Link>
+                    <div className="shrink-0 text-right">
+                      <div className="text-xs font-medium">
+                        {b.subscription?.plan.name ?? "—"}
+                      </div>
+                      <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                        {formatPHDate(b.createdAt)}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </CardContent>
         </Card>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Recent businesses</CardTitle>
+          <CardTitle>Need more?</CardTitle>
           <CardDescription>
-            Last {businesses.length} signups with plan and team counts.
+            Deeper analytics, lifecycle views, and tenant management.
           </CardDescription>
         </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-                <tr>
-                  <th className="px-6 py-3 font-medium">Business</th>
-                  <th className="px-6 py-3 font-medium">Owner</th>
-                  <th className="px-6 py-3 font-medium">Plan</th>
-                  <th className="px-6 py-3 font-medium">Members</th>
-                  <th className="px-6 py-3 font-medium">Branches</th>
-                  <th className="px-6 py-3 font-medium">Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {businesses.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={6}
-                      className="px-6 py-12 text-center text-neutral-500 dark:text-neutral-400"
-                    >
-                      No businesses yet.
-                    </td>
-                  </tr>
-                ) : (
-                  businesses.map((b) => (
-                    <tr
-                      key={b.id}
-                      className="border-b border-neutral-100 last:border-0 dark:border-neutral-800"
-                    >
-                      <td className="px-6 py-3">
-                        <div className="font-medium">{b.name}</div>
-                        <div className="text-xs text-neutral-500 dark:text-neutral-400">
-                          {b.slug}
-                        </div>
-                      </td>
-                      <td className="px-6 py-3">
-                        <div>{b.owner.fullName ?? "—"}</div>
-                        <div className="text-xs text-neutral-500 dark:text-neutral-400">
-                          {b.owner.email}
-                        </div>
-                      </td>
-                      <td className="px-6 py-3">
-                        {b.subscription?.plan.code ?? (
-                          <span className="text-neutral-400">no plan</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-3">{b._count.members}</td>
-                      <td className="px-6 py-3">{b._count.branches}</td>
-                      <td className="px-6 py-3 text-neutral-600 dark:text-neutral-400">
-                        {formatPHDate(b.createdAt)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+        <CardContent className="grid gap-2 sm:grid-cols-3">
+          <Link
+            href="/admin/payments"
+            className="inline-flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-sm transition-colors hover:border-[var(--brand-accent)] hover:bg-[var(--brand-soft)] dark:border-neutral-800"
+          >
+            <span className="flex items-center gap-2">
+              <TriangleAlert className="h-4 w-4 text-amber-600" /> Review payments
+            </span>
+            <ArrowRight className="h-4 w-4 text-neutral-400" />
+          </Link>
+          <Link
+            href="/admin/subscriptions"
+            className="inline-flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-sm transition-colors hover:border-[var(--brand-accent)] hover:bg-[var(--brand-soft)] dark:border-neutral-800"
+          >
+            <span className="flex items-center gap-2">
+              <CreditCard className="h-4 w-4 text-blue-600" /> Subscriptions
+            </span>
+            <ArrowRight className="h-4 w-4 text-neutral-400" />
+          </Link>
+          <Link
+            href="/admin/analytics"
+            className="inline-flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-sm transition-colors hover:border-[var(--brand-accent)] hover:bg-[var(--brand-soft)] dark:border-neutral-800"
+          >
+            <span className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-emerald-600" /> Full analytics
+            </span>
+            <ArrowRight className="h-4 w-4 text-neutral-400" />
+          </Link>
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  sub,
-  highlight,
-}: {
-  label: string;
-  value: number;
-  sub?: string;
-  highlight?: boolean;
-}) {
-  return (
-    <Card
-      className={
-        highlight ? "border-amber-300 ring-1 ring-amber-200 dark:border-amber-700" : ""
-      }
-    >
-      <CardContent className="pt-6">
-        <div className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-          {label}
-        </div>
-        <div className="mt-1 text-3xl font-semibold tabular-nums">
-          {value.toLocaleString()}
-        </div>
-        {sub ? (
-          <div className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-            {sub}
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
   );
 }

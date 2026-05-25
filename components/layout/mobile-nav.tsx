@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Menu } from "lucide-react";
+import { Logo } from "@/components/brand/logo";
 import {
   Sheet,
   SheetContent,
@@ -34,7 +35,9 @@ export function MobileNav({ businessName }: MobileNavProps) {
       </SheetTrigger>
       <SheetContent side="left" className="w-72 p-0">
         <SheetHeader className="border-b border-neutral-200 px-5 py-4 text-left dark:border-neutral-800">
-          <SheetTitle>POS SaaS</SheetTitle>
+          <SheetTitle className="m-0">
+            <Logo size="sm" />
+          </SheetTitle>
           <SheetDescription>{businessName}</SheetDescription>
         </SheetHeader>
         <SidebarNav onNavigate={() => setOpen(false)} />

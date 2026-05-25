@@ -55,7 +55,7 @@ export function SignupForm() {
         setEmailSentTo(values.email);
         return;
       }
-      toast.success("Welcome to POS SaaS");
+      toast.success("Welcome to Vendora");
       router.replace(result.data.redirectTo);
       router.refresh();
     });

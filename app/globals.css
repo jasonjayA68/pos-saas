@@ -7,8 +7,21 @@
   --background: #ffffff;
   --foreground: #171717;
 
-  /* Design tokens — Stripe / Shopify POS inspired.
-   * Use via tailwind arbitrary values, e.g. `shadow-[var(--shadow-card)]`. */
+  /* ── Vendora brand palette ────────────────────────────────────────
+   * Sourced from the logo: navy wordmark + ascending teal→blue bars.
+   *   --brand-primary   — navy CTAs, headings, sidebar accents
+   *   --brand-accent    — interactive blue: links, focus, hover
+   *   --brand-teal      — secondary accent for charts and decorative bits
+   *   --brand-soft      — tinted background for highlighted panels
+   * Use via Tailwind arbitrary values: `bg-[var(--brand-primary)]`. */
+  --brand-primary: #1b2c5a;
+  --brand-primary-hover: #142244;
+  --brand-accent: #2b89d9;
+  --brand-accent-hover: #1f6fb8;
+  --brand-teal: #1dc4d9;
+  --brand-soft: #eef4fb;
+
+  /* Design tokens — Stripe / Shopify POS inspired. */
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -24,6 +37,14 @@
 .dark {
   --background: #0a0a0a;
   --foreground: #ededed;
+
+  /* Lighten brand tokens in dark mode for AA contrast. */
+  --brand-primary: #6a85d6;
+  --brand-primary-hover: #8aa0e0;
+  --brand-accent: #4da8ec;
+  --brand-accent-hover: #6abaf0;
+  --brand-teal: #2ed5e9;
+  --brand-soft: #1a2440;
 
   --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.4);
   --shadow-elevated: 0 4px 12px -2px rgb(0 0 0 / 0.5), 0 2px 4px 0 rgb(0 0 0 / 0.3);

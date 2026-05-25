@@ -53,7 +53,7 @@ export function LoginForm({ nextUrl }: { nextUrl?: string }) {
     <Card>
       <CardHeader>
         <CardTitle>Sign in</CardTitle>
-        <CardDescription>Welcome back. Log in to your POS.</CardDescription>
+        <CardDescription>Welcome back. Log in to your Vendora account.</CardDescription>
       </CardHeader>
       <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
         <CardContent className="space-y-4">

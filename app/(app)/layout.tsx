@@ -6,6 +6,7 @@ import { MemberProvider } from "@/lib/auth/member-context";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getRequiredPermissionForPath } from "@/lib/auth/route-guard";
 import { getSubscriptionGate } from "@/lib/billing/guard";
+import { getCurrentPlanSummary } from "@/features/dashboard/queries";
 import { AppShell } from "@/components/layout/app-shell";
 import { HotkeyProvider } from "@/lib/keyboard/use-hotkey";
 import { BillingStatusBanner } from "./billing/_components/billing-status-banner";
@@ -27,7 +28,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const headersList = await headers();
   const pathname = headersList.get("x-pathname") ?? "";
 
-  const gate = await getSubscriptionGate(member.businessId);
+  // Fetch gate + plan summary in parallel so the layout doesn't pay
+  // two sequential round-trips per request.
+  const [gate, plan] = await Promise.all([
+    getSubscriptionGate(member.businessId),
+    getCurrentPlanSummary(member.businessId),
+  ]);
   if (gate.blocked && !pathname.startsWith(BILLING_EXEMPT_PREFIX)) {
     redirect(`/billing/plans?reason=${gate.reason ?? "expired"}`);
   }
@@ -55,6 +61,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           fullName={member.fullName}
           email={member.email}
           roleName={member.roleName}
+          plan={plan}
         >
           <BillingStatusBanner gate={gate} />
           {children}

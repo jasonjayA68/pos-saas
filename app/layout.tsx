@@ -15,8 +15,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "POS SaaS",
-  description: "Point of sale for Philippine small businesses",
+  // `template` is applied whenever a page sets its own metadata.title —
+  // so a page with `title: "Settings"` becomes "Settings · Vendora" in
+  // the browser tab. `default` is the bare title used when none is set.
+  title: {
+    default: "Vendora",
+    template: "%s · Vendora",
+  },
+  description: "Vendora — Point of sale for Philippine small businesses",
+  applicationName: "Vendora",
 };
 
 export default async function RootLayout({

@@ -438,6 +438,36 @@ export type SaasAnalytics = {
   }>;
 };
 
+// Plan distribution for the donut chart on the admin overview. One row
+// per plan, descending count.
+export type PlanDistribution = Array<{
+  planCode: string;
+  planName: string;
+  count: number;
+}>;
+
+export async function getTenantsByPlan(): Promise<PlanDistribution> {
+  await verifyPlatformAdmin();
+  const grouped = await prisma.subscription.groupBy({
+    by: ["planId"],
+    _count: { _all: true },
+  });
+  const planIds = grouped.map((g) => g.planId);
+  const plans = await prisma.plan.findMany({
+    where: { id: { in: planIds } },
+    select: { id: true, code: true, name: true },
+  });
+  const byId = new Map(plans.map((p) => [p.id, p]));
+  return grouped
+    .map<PlanDistribution[number] | null>((g) => {
+      const p = byId.get(g.planId);
+      if (!p) return null;
+      return { planCode: p.code, planName: p.name, count: g._count._all };
+    })
+    .filter((p): p is PlanDistribution[number] => p !== null)
+    .sort((a, b) => b.count - a.count);
+}
+
 export async function getSaasAnalytics(): Promise<SaasAnalytics> {
   await verifyPlatformAdmin();
 
