@@ -18,6 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Field } from "@/components/forms/field";
 
 export function SignupForm() {
@@ -130,9 +131,8 @@ export function SignupForm() {
             error={form.formState.errors.password?.message}
             hint="At least 8 characters, with upper, lower, and a number."
           >
-            <Input
+            <PasswordInput
               id="password"
-              type="password"
               autoComplete="new-password"
               {...form.register("password")}
             />
@@ -142,9 +142,8 @@ export function SignupForm() {
             htmlFor="confirmPassword"
             error={form.formState.errors.confirmPassword?.message}
           >
-            <Input
+            <PasswordInput
               id="confirmPassword"
-              type="password"
               autoComplete="new-password"
               {...form.register("confirmPassword")}
             />

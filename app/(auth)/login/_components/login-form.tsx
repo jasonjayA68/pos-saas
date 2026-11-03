@@ -18,6 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Field } from "@/components/forms/field";
 
 export function LoginForm({ nextUrl }: { nextUrl?: string }) {
@@ -74,9 +75,8 @@ export function LoginForm({ nextUrl }: { nextUrl?: string }) {
             htmlFor="password"
             error={form.formState.errors.password?.message}
           >
-            <Input
+            <PasswordInput
               id="password"
-              type="password"
               autoComplete="current-password"
               {...form.register("password")}
             />
